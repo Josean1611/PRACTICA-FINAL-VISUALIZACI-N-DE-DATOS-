@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Presión turística y vivienda en Barcelona</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Spectral:wght@600;700&family=Archivo:wght@400;600&display=swap" rel="stylesheet">
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+
+  <style>
+    :root {
+      --tinta:   #1a1a1a;
+      --suave:   #6b6b6b;
+      --linea:   #e2e2e2;
+      --fondo:   #faf8f5;
+      --sindato: #d8d8d8;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--fondo); color: var(--tinta);
+      font-family: 'Archivo', sans-serif; line-height: 1.5;
+    }
+
+    /* ---------- Cabecera (hero) ---------- */
+    /* ---------- Cabecera (hero) a pantalla completa con imagen difuminada ---------- */
+    .hero {
+      position: relative; overflow: hidden;
+      min-height: 100vh;                 /* al cargar solo se ve la cabecera */
+      display: flex; flex-direction: column; justify-content: center;
+      padding: 2rem 1.5rem;
+    }
+    /* Capa de imagen difuminada (detrás del texto). Coloca tu foto en assets/hero-barcelona.jpg */
+    .hero::before {
+      content: ""; position: absolute; inset: 0; z-index: -2;
+      background: #cdbfae url('assets/hero-barcelona.jpg') center/cover no-repeat;
+      filter: blur(7px) saturate(1.05); transform: scale(1.08);
+    }
+    /* Velo cálido que mantiene el texto legible y funde con el fondo del resto */
+    .hero::after {
+      content: ""; position: absolute; inset: 0; z-index: -1;
+      background: linear-gradient(180deg,
+                  rgba(250,248,245,0.45) 0%,
+                  rgba(250,248,245,0.78) 60%,
+                  var(--fondo) 100%);
+    }
+    .hero-contenido { max-width: 900px; margin: 0 auto; width: 100%; }
+    .hero h1 {
+      font-family: 'Spectral', serif; font-weight: 700;
+      font-size: clamp(2.2rem, 5.5vw, 3.6rem); line-height: 1.1; letter-spacing: -0.02em;
+      text-shadow: 0 1px 30px rgba(250,248,245,0.6);
+    }
+    .hero .entradilla { color: #3a3a3a; margin-top: 1rem; max-width: 60ch; font-size: 1.1rem; }
+    .scroll-hint { margin-top: 2.5rem; color: var(--suave); font-size: 0.85rem; letter-spacing: 0.08em;
+                   text-transform: uppercase; animation: latido 2s ease-in-out infinite; }
+    @keyframes latido { 0%,100%{opacity:0.4} 50%{opacity:1} }
+
+    /* ---------- Estructura scrollytelling ---------- */
+    .scrolly { position: relative; max-width: 1280px; margin: 0 auto; padding: 0 1.5rem;
+               display: grid; grid-template-columns: 58% 42%; gap: 2rem; }
+
+    /* Gráfico fijo a la IZQUIERDA */
+    .grafico-sticky {
+      position: sticky; top: 0; height: 100vh;
+      display: flex; flex-direction: column; justify-content: center; align-items: center;
+    }
+    .escena { position: absolute; width: 100%; opacity: 0; visibility: hidden;
+              transition: opacity 0.6s ease; pointer-events: none; }
+    .escena.visible { opacity: 1; visibility: visible; pointer-events: auto; }
+
+    /* Columna de texto a la DERECHA */
+    .pasos { padding: 0; }
+    .paso { min-height: 92vh; display: flex; flex-direction: column; justify-content: center; }
+    .paso-card {
+      background: #fff; border: 1px solid var(--linea); border-radius: 14px;
+      padding: 1.8rem; box-shadow: 0 8px 30px rgba(0,0,0,0.05);
+      opacity: 0.35; transform: translateY(12px); transition: all 0.5s ease;
+    }
+    .paso.activo .paso-card { opacity: 1; transform: translateY(0); }
+    .paso-card .acto { font-size: 0.78rem; letter-spacing: 0.12em; text-transform: uppercase;
+                       color: #c0392b; font-weight: 600; }
+    .paso-card h2 { font-family: 'Spectral', serif; font-weight: 600; font-size: 1.5rem;
+                    margin: 0.4rem 0 0.8rem; line-height: 1.2; }
+    .paso-card p { color: #333; font-size: 1rem; }
+    .paso-card .dato-clave { display:block; margin-top: 0.9rem; font-size: 0.92rem; color: var(--suave); }
+
+    /* ---------- Mapa ---------- */
+    #mapa { display: block; width: 100%; height: auto; max-height: 78vh; }
+    .barrio { stroke: var(--fondo); stroke-width: 0.6px; cursor: pointer;
+              transition: opacity 0.18s, stroke 0.18s, stroke-width 0.18s; }
+    .barrio.resaltado { stroke: var(--tinta); stroke-width: 1.6px; }
+
+    /* Leyenda */
+    .leyenda { display: flex; align-items: center; gap: 0.4rem; margin-top: 0.6rem;
+               font-size: 0.78rem; color: var(--suave); flex-wrap: wrap; justify-content: center; }
+    .leyenda .swatch { width: 24px; height: 13px; display: inline-block; }
+
+    /* Pestañas (solo visibles en modo explorador) */
+    .pestanas { display: flex; gap: 0.5rem; margin-bottom: 0.8rem; flex-wrap: wrap;
+                justify-content: center; opacity: 0; pointer-events: none; transition: opacity 0.5s;
+                height: 0; overflow: hidden; }
+    .pestanas.activas { opacity: 1; pointer-events: auto; height: auto; }
+    .pestana { font-family: 'Archivo'; font-size: 0.88rem; padding: 0.45rem 0.9rem;
+               border: 1px solid var(--linea); background: #fff; color: var(--suave);
+               border-radius: 999px; cursor: pointer; transition: all 0.15s; }
+    .pestana:hover { border-color: var(--tinta); color: var(--tinta); }
+    .pestana[aria-pressed="true"] { background: var(--tinta); color: #fff; border-color: var(--tinta); }
+
+    /* Control deslizante de disponibilidad (solo visible en explorador + presión) */
+    .control-filtro { display: none; flex-direction: column; align-items: center; gap: 0.4rem;
+                      margin-bottom: 0.8rem; font-size: 0.85rem; color: var(--suave); width: 100%;
+                      max-width: 420px; }
+    .control-filtro.visible { display: flex; }
+    .control-filtro b { color: var(--tinta); }
+    .control-filtro input[type="range"] { width: 100%; accent-color: #c0392b; cursor: pointer; }
+
+    /* ---------- Scatter ---------- */
+    #scatter { display: block; width: 100%; height: auto; max-height: 70vh; overflow: visible; }
+    .punto { cursor: pointer; stroke: #fff; stroke-width: 0.8px;
+             transition: r 0.18s, opacity 0.18s, stroke-width 0.18s; }
+    .punto.resaltado { stroke: var(--tinta); stroke-width: 2px; }
+    .eje text { fill: var(--suave); font-size: 11px; font-family: 'Archivo'; }
+    .eje line, .eje path { stroke: var(--linea); }
+    .eje-titulo { fill: var(--tinta); font-size: 12px; font-weight: 600; font-family: 'Archivo'; }
+    .tendencia { stroke: var(--tinta); stroke-width: 2px; stroke-dasharray: 6 4; opacity: 0.7; }
+    .titulo-escena { font-family: 'Spectral', serif; font-size: 1.1rem; text-align: center;
+                     margin-bottom: 0.3rem; color: var(--tinta); }
+    .nota-corr { margin-top: 0.6rem; font-size: 0.82rem; color: var(--suave); text-align: center;
+                 max-width: 90%; margin-left: auto; margin-right: auto; }
+    .nota-corr b { color: var(--tinta); }
+
+    /* ---------- Cierre ---------- */
+    .cierre { max-width: 760px; margin: 4rem auto 6rem; padding: 0 1.5rem; text-align: center; }
+    .cierre h2 { font-family: 'Spectral', serif; font-size: 1.8rem; }
+    .cierre p { color: var(--suave); margin-top: 0.8rem; }
+
+    #tooltip { position: absolute; pointer-events: none; opacity: 0; background: var(--tinta);
+               color: #fff; padding: 0.6rem 0.8rem; border-radius: 6px; font-size: 0.82rem;
+               line-height: 1.4; box-shadow: 0 4px 16px rgba(0,0,0,0.2); transition: opacity 0.1s;
+               max-width: 240px; z-index: 10; }
+    #tooltip .t-barrio { font-weight: 600; margin-bottom: 0.2rem; }
+    #tooltip .t-dato { color: #f0c674; font-weight: 600; }
+    #estado { color: #b00020; text-align: center; padding: 2rem; }
+
+    /* ---------- Responsive: una columna en móvil ---------- */
+    @media (max-width: 820px) {
+      .scrolly { grid-template-columns: 1fr; gap: 0; }
+      .grafico-sticky { height: 56vh; top: 0; background: var(--fondo);
+                        border-bottom: 1px solid var(--linea); z-index: 5; }
+      #mapa, #scatter { max-height: 48vh; }
+      .paso { min-height: 70vh; }
+    }
+  </style>
+</head>
+<body>
+
+  <header class="hero">
+    <div class="hero-contenido">
+      <h1>El pulso turístico de Barcelona</h1>
+      <p class="entradilla">
+        ¿Está el turismo encareciendo la vivienda? Un recorrido por los barrios de la ciudad,
+        cruzando 19.000 anuncios de Airbnb con una década de precios del alquiler.
+      </p>
+      <p class="scroll-hint">↓ Desplázate para empezar</p>
+    </div>
+  </header>
+
+  <div class="scrolly">
+
+    <!-- ===== GRÁFICO FIJO (izquierda) ===== -->
+    <div class="grafico-sticky">
+      <!-- Escena MAPA -->
+      <div class="escena visible" id="escena-mapa">
+        <div class="pestanas" id="pestanas" role="group" aria-label="Elegir métrica"></div>
+        <div class="control-filtro" id="control-filtro">
+          <label for="slider-disp">Mostrar solo viviendas disponibles al menos
+            <b><span id="valor-disp">0</span> días/año</b></label>
+          <input type="range" id="slider-disp" min="0" max="365" step="5" value="0"
+                 aria-label="Disponibilidad mínima en días por año">
+        </div>
+        <svg id="mapa" role="img" aria-label="Mapa coroplético por barrio de Barcelona"></svg>
+        <div class="leyenda" id="leyenda" aria-hidden="true"></div>
+      </div>
+      <!-- Escena SCATTER -->
+      <div class="escena" id="escena-scatter">
+        <div class="titulo-escena">¿Más Airbnb significa más subida del alquiler?</div>
+        <svg id="scatter" role="img" aria-label="Dispersión: presión turística frente a incremento del alquiler"></svg>
+        <p class="nota-corr" id="nota-corr"></p>
+      </div>
+    </div>
+
+    <!-- ===== PASOS DE TEXTO (derecha) ===== -->
+    <div class="pasos" id="pasos">
+      <div class="paso" data-paso="0">
+        <div class="paso-card">
+          <span class="acto">Acto 1 · La saturación</span>
+          <h2>Un centro tomado por el turismo</h2>
+          <p>Barcelona concentra los pisos turísticos en su corazón. Ciutat Vella y el Eixample
+             superan los <b>800 anuncios por km²</b>, mientras la periferia apenas tiene presencia.
+             El mapa muestra esa densidad: cuanto más rojo, más presión sobre el vecindario.</p>
+          <span class="dato-clave">Pasa el ratón sobre un barrio para ver sus cifras.</span>
+        </div>
+      </div>
+      <div class="paso" data-paso="1">
+        <div class="paso-card">
+          <span class="acto">Acto 2 · La sorpresa</span>
+          <h2>Pero el alquiler no sube donde más Airbnb hay</h2>
+          <p>Si el turismo encareciera directamente la vivienda, los barrios con más Airbnb
+             serían los que más se han encarecido. Al enfrentar ambas variables, la nube de
+             puntos se dispersa y la tendencia es <b>casi plana</b>: a nivel de barrio,
+             la relación directa no aparece.</p>
+          <span class="dato-clave">Cada punto es un barrio. Señálalo para localizarlo en el mapa.</span>
+        </div>
+      </div>
+      <div class="paso" data-paso="2">
+        <div class="paso-card">
+          <span class="acto">Acto 3 · El matiz</span>
+          <h2>El daño ya está hecho (y no es uniforme)</h2>
+          <p>La rentabilidad cuenta otra historia. En el <b>Eixample</b> (rojo) Airbnb renta más
+             que el alquiler. Pero <b>Ciutat Vella</b> aparece en azul: no porque el turismo
+             rente poco, sino porque allí el alquiler ya está tan disparado que lo iguala.
+             La presión histórica se cobró su precio hace tiempo.</p>
+          <span class="dato-clave">Azul: gana el alquiler · Rojo: gana el uso turístico.</span>
+        </div>
+      </div>
+      <div class="paso" data-paso="3">
+        <div class="paso-card">
+          <span class="acto">Explóralo tú</span>
+          <h2>Tu turno</h2>
+          <p>Cambia entre las tres métricas con los botones sobre el mapa y recórrelo libremente.
+             Cada barrio guarda su propia historia entre el turismo y el derecho a la vivienda.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="cierre">
+    <h2>Una relación más compleja de lo que parece</h2>
+    <p>Los datos no dibujan una correlación directa, sino un fenómeno con memoria:
+       el impacto del turismo sobre la vivienda no se mide solo en cuánto sube hoy,
+       sino en cuánto subió ya. De hecho, el alquiler ha crecido entre un 40% y un 60%
+       en casi toda la ciudad —lo puedes comprobar con la métrica <b>«Incremento del alquiler»</b>
+       en el mapa de arriba—, con relativa independencia de dónde se concentra el turismo.</p>
+  </div>
+
+  <div id="tooltip"></div>
+  <p id="estado"></p>
+
+  <script>
+  // ===================================================================
+  //  DEFINICIÓN DE LAS TRES MÉTRICAS
+  // ===================================================================
+  const METRICAS = {
+    presion: {
+      campo: "presion_turistica", etiqueta: "Presión turística", unidad: "viviendas/km²",
+      subtitulo: "Densidad de viviendas enteras de Airbnb por barrio (anuncios por km²).",
+      formato: d => d3.format(",.0f")(d), tipo: "secuencial", esquema: d3.schemeYlOrRd[6]
+    },
+    incremento: {
+      campo: "incremento_alquiler", etiqueta: "Incremento del alquiler", unidad: "%",
+      subtitulo: "Subida porcentual del alquiler residencial medio entre 2015 y 2025.",
+      formato: d => d3.format(",.0f")(d), tipo: "secuencial", esquema: d3.schemePuRd[6]
+    },
+    brecha: {
+      campo: "brecha_ratio", etiqueta: "Brecha de rentabilidad", unidad: "× alquiler",
+      subtitulo: "Veces que renta más una vivienda en Airbnb que en alquiler. Azul: gana el alquiler; rojo: gana el turismo.",
+      formato: d => d3.format(",.2f")(d), tipo: "divergente", centro: 1
+    }
+  };
+  let metricaActiva = METRICAS.presion;
+
+  const ancho = 900, alto = 600;
+  const svg = d3.select("#mapa").attr("viewBox", `0 0 ${ancho} ${alto}`).attr("width", "100%");
+  const tooltip = d3.select("#tooltip");
+  let geoDatos, trazar, colorActual, scatterListo = false;
+  let dispPorBarrio = null;     // barrio -> [disponibilidades] (para el filtro)
+  let umbral = 0;               // días/año mínimos de disponibilidad
+  let explorerActivo = false;   // ¿estamos en modo explorador?
+
+  // ===================================================================
+  //  CARGA DE DATOS
+  // ===================================================================
+  Promise.all([
+    d3.json("datos_clean/barrios_metricas.geojson"),
+    d3.csv("datos_clean/puntos_airbnb.csv", d => ({
+      barrio: d.neighbourhood, disp: +d.availability_365
+    }))
+  ]).then(([geo, puntos]) => {
+    console.log("Cargados:", geo.features.length, "barrios y", puntos.length, "anuncios");
+    geoDatos = geo;
+    // Índice barrio -> lista de disponibilidades (para el filtro en vivo)
+    dispPorBarrio = d3.rollup(puntos, v => v.map(d => d.disp), d => d.barrio);
+
+    const proyeccion = d3.geoMercator().fitSize([ancho, alto], geo);
+    trazar = d3.geoPath(proyeccion);
+
+    svg.selectAll("path.barrio").data(geo.features).join("path")
+      .attr("class", "barrio").attr("d", trazar)
+      .on("mousemove", (e, f) => { mostrarTooltip(e, f); resaltar(f.properties.barrio); })
+      .on("mouseleave", () => { tooltip.style("opacity", 0); limpiarResalte(); });
+
+    crearPestanas();
+    crearFiltro();
+    pintar();
+    iniciarScroll();   // activa el scrollytelling
+  })
+  .catch(err => {
+    console.error(err);
+    d3.select("#estado").text("⚠ No se pudieron cargar los datos (" + err.message +
+      "). Asegúrate de servir la página por http://localhost (no con doble clic) y de que datos_clean está junto a index.html.");
+  });
+
+  // ===================================================================
+  //  ESCALA DE COLOR
+  // ===================================================================
+  function construirEscala() {
+    const vals = geoDatos.features.map(f => f.properties[metricaActiva.campo]).filter(v => v != null);
+    if (metricaActiva.tipo === "divergente") {
+      const c = metricaActiva.centro;
+      const max = Math.max(c - d3.min(vals), d3.max(vals) - c);
+      return d3.scaleDiverging([c - max, c, c + max], t => d3.interpolateRdBu(1 - t));
+    }
+    return d3.scaleQuantile().domain(vals).range(metricaActiva.esquema);
+  }
+
+  // ===================================================================
+  //  VALOR de un barrio según la métrica activa.
+  //  Para PRESIÓN, si hay umbral de disponibilidad, recalcula la densidad
+  //  contando solo las viviendas con availability_365 >= umbral.
+  // ===================================================================
+  function valorBarrio(f) {
+    const p = f.properties;
+    if (metricaActiva === METRICAS.presion && umbral > 0 && dispPorBarrio) {
+      const arr = dispPorBarrio.get(p.barrio) || [];
+      const n = arr.filter(a => a >= umbral).length;
+      return p.area_km2 > 0 ? n / p.area_km2 : 0;
+    }
+    return p[metricaActiva.campo];
+  }
+
+  // ===================================================================
+  //  PINTAR el mapa con la métrica activa
+  // ===================================================================
+  function pintar() {
+    colorActual = construirEscala();   // escala fija (dominio = datos completos)
+    svg.selectAll("path.barrio").transition().duration(450)
+      .attr("fill", f => {
+        const v = valorBarrio(f);
+        return v == null ? "#d8d8d8" : colorActual(v);
+      });
+    d3.selectAll(".pestana").attr("aria-pressed", function () {
+      return d3.select(this).text() === metricaActiva.etiqueta ? "true" : "false";
+    });
+    dibujarLeyenda();
+    actualizarVisibilidadFiltro();   // el filtro solo aplica a presión
+  }
+
+  // ===================================================================
+  //  TOOLTIP del mapa
+  // ===================================================================
+  function mostrarTooltip(evento, f) {
+    const p = f.properties;
+    const v = valorBarrio(f);   // refleja el filtro si está activo
+    tooltip.style("opacity", 1)
+      .style("left", (evento.pageX + 14) + "px").style("top", (evento.pageY + 14) + "px")
+      .html(`<div class="t-barrio">${p.barrio}</div>
+        <div>${metricaActiva.etiqueta}:
+          <span class="t-dato">${v == null ? "sin dato" : metricaActiva.formato(v) + " " + metricaActiva.unidad}</span></div>
+        <div>${d3.format(",.0f")(p.n_viviendas_enteras)} viviendas enteras ·
+             alquiler ${p.alq_2025 == null ? "—" : d3.format(",.0f")(p.alq_2025) + " €/mes"}</div>`);
+  }
+
+  // ===================================================================
+  //  PESTAÑAS
+  // ===================================================================
+  function crearPestanas() {
+    const cont = d3.select("#pestanas");
+    Object.values(METRICAS).forEach(m => {
+      cont.append("button").attr("class", "pestana").attr("type", "button")
+        .attr("aria-pressed", m === metricaActiva ? "true" : "false")
+        .text(m.etiqueta)
+        .on("click", function () {
+          metricaActiva = m;
+          cont.selectAll(".pestana").attr("aria-pressed", "false");
+          d3.select(this).attr("aria-pressed", "true");
+          pintar();
+        });
+    });
+  }
+
+  // ===================================================================
+  //  FILTRO de disponibilidad
+  // ===================================================================
+  function crearFiltro() {
+    d3.select("#slider-disp").on("input", function () {
+      umbral = +this.value;
+      d3.select("#valor-disp").text(umbral);
+      pintar();   // recolorea la presión con la densidad filtrada
+    });
+  }
+
+  // El filtro solo tiene sentido en modo explorador y con la métrica de presión
+  function actualizarVisibilidadFiltro() {
+    const mostrar = explorerActivo && metricaActiva === METRICAS.presion;
+    d3.select("#control-filtro").classed("visible", mostrar);
+  }
+
+  // ===================================================================
+  //  LEYENDA
+  // ===================================================================
+  function dibujarLeyenda() {
+    const fmt = metricaActiva.formato;
+    const cont = d3.select("#leyenda").html("");
+    cont.append("span").text(metricaActiva.etiqueta + ":");
+    if (metricaActiva.tipo === "divergente") {
+      const [min, , max] = colorActual.domain();
+      d3.range(6).forEach(i => {
+        const v = min + (max - min) * (i + 0.5) / 6;
+        cont.append("span").attr("class", "swatch").style("background", colorActual(v));
+      });
+      cont.append("span").text("← gana alquiler · =1 · gana Airbnb →");
+    } else {
+      const cortes = colorActual.quantiles();
+      metricaActiva.esquema.forEach((tono, i) => {
+        cont.append("span").attr("class", "swatch").style("background", tono);
+        const desde = i === 0 ? d3.min(colorActual.domain()) : cortes[i - 1];
+        const hasta = i < cortes.length ? cortes[i] : null;
+        cont.append("span").text(hasta == null ? `> ${fmt(desde)}` : `${fmt(desde)}–${fmt(hasta)}`);
+      });
+    }
+  }
+
+  // ===================================================================
+  //  SCATTERPLOT (se construye la primera vez que se muestra)
+  // ===================================================================
+  function construirScatter() {
+    if (scatterListo) return;
+    scatterListo = true;
+    const W = 900, H = 560, m = { top: 20, right: 30, bottom: 55, left: 60 };
+    const iw = W - m.left - m.right, ih = H - m.top - m.bottom;
+    const sce = d3.select("#scatter").attr("viewBox", `0 0 ${W} ${H}`).attr("width", "100%");
+    const g = sce.append("g").attr("transform", `translate(${m.left},${m.top})`);
+
+    const datos = geoDatos.features.map(f => f.properties)
+      .filter(p => p.presion_turistica != null && p.incremento_alquiler != null);
+
+    const x = d3.scaleLinear().domain([0, d3.max(datos, d => d.presion_turistica) * 1.05]).range([0, iw]);
+    const y = d3.scaleLinear().domain([0, d3.max(datos, d => d.incremento_alquiler) * 1.05]).range([ih, 0]);
+    const colP = d3.scaleQuantile().domain(datos.map(d => d.presion_turistica)).range(d3.schemeYlOrRd[6]);
+
+    g.append("g").attr("class", "eje").attr("transform", `translate(0,${ih})`).call(d3.axisBottom(x).ticks(6));
+    g.append("g").attr("class", "eje").call(d3.axisLeft(y).ticks(6));
+    g.append("text").attr("class", "eje-titulo").attr("x", iw / 2).attr("y", ih + 45)
+      .attr("text-anchor", "middle").text("Presión turística (viviendas enteras / km²)");
+    g.append("text").attr("class", "eje-titulo").attr("transform", "rotate(-90)")
+      .attr("x", -ih / 2).attr("y", -45).attr("text-anchor", "middle")
+      .text("Incremento del alquiler 2015–2025 (%)");
+
+    const reg = regresionLineal(datos.map(d => d.presion_turistica), datos.map(d => d.incremento_alquiler));
+    const x1 = d3.max(datos, d => d.presion_turistica);
+    const linea = g.append("line").attr("class", "tendencia")
+      .attr("x1", x(0)).attr("y1", y(reg.f(0))).attr("x2", x(0)).attr("y2", y(reg.f(0)));
+    linea.transition().delay(900).duration(700).attr("x2", x(x1)).attr("y2", y(reg.f(x1)));
+
+    g.selectAll("circle.punto").data(datos, d => d.barrio).join("circle")
+      .attr("class", "punto")
+      .attr("cx", d => x(d.presion_turistica)).attr("cy", d => y(d.incremento_alquiler))
+      .attr("fill", d => colP(d.presion_turistica)).attr("r", 0).attr("opacity", 0.85)
+      .on("mousemove", (e, d) => { mostrarTooltipScatter(e, d); resaltar(d.barrio); })
+      .on("mouseleave", () => { tooltip.style("opacity", 0); limpiarResalte(); })
+      .transition().delay((d, i) => i * 12).duration(400).attr("r", 5);
+
+    d3.select("#nota-corr").html(
+      `Coeficiente de correlación: <b>r = ${d3.format(".2f")(reg.r)}</b> · tendencia casi plana → ` +
+      `<b>sin relación directa</b> entre cantidad de Airbnb y subida del alquiler por barrio.`);
+  }
+
+  function regresionLineal(xs, ys) {
+    const n = xs.length, mx = d3.mean(xs), my = d3.mean(ys);
+    let sxy = 0, sxx = 0, syy = 0;
+    for (let i = 0; i < n; i++) {
+      sxy += (xs[i] - mx) * (ys[i] - my); sxx += (xs[i] - mx) ** 2; syy += (ys[i] - my) ** 2;
+    }
+    return { r: sxy / Math.sqrt(sxx * syy), f: x => (my - (sxy / sxx) * mx) + (sxy / sxx) * x };
+  }
+
+  function mostrarTooltipScatter(evento, d) {
+    tooltip.style("opacity", 1)
+      .style("left", (evento.pageX + 14) + "px").style("top", (evento.pageY + 14) + "px")
+      .html(`<div class="t-barrio">${d.barrio}</div>
+        <div>Presión: <span class="t-dato">${d3.format(",.0f")(d.presion_turistica)} viv/km²</span></div>
+        <div>Subida alquiler: <span class="t-dato">${d3.format(",.0f")(d.incremento_alquiler)} %</span></div>`);
+  }
+
+  // ===================================================================
+  //  RESALTE CRUZADO mapa <-> scatter
+  // ===================================================================
+  function resaltar(nombre) {
+    svg.selectAll("path.barrio").classed("resaltado", f => f.properties.barrio === nombre)
+      .attr("opacity", f => f.properties.barrio === nombre ? 1 : 0.35);
+    d3.selectAll("circle.punto").classed("resaltado", d => d.barrio === nombre)
+      .attr("r", d => d.barrio === nombre ? 9 : 5).attr("opacity", d => d.barrio === nombre ? 1 : 0.25);
+  }
+  function limpiarResalte() {
+    svg.selectAll("path.barrio").classed("resaltado", false).attr("opacity", 1);
+    d3.selectAll("circle.punto").classed("resaltado", false).attr("r", 5).attr("opacity", 0.85);
+  }
+
+  // ===================================================================
+  //  SCROLLYTELLING: cambia de escena/métrica según el paso visible
+  // ===================================================================
+  function mostrarEscena(cual) {
+    d3.select("#escena-mapa").classed("visible", cual === "mapa");
+    d3.select("#escena-scatter").classed("visible", cual === "scatter");
+    if (cual === "scatter") construirScatter();   // lo crea la 1ª vez
+  }
+
+  // Acción de cada paso (índice = data-paso)
+  const ACCIONES = [
+    () => { mostrarEscena("mapa");    metricaActiva = METRICAS.presion;  pintar(); explorador(false); },
+    () => { mostrarEscena("scatter"); },
+    () => { mostrarEscena("mapa");    metricaActiva = METRICAS.brecha;   pintar(); explorador(false); },
+    () => { mostrarEscena("mapa");    explorador(true); }
+  ];
+
+  function explorador(activo) {
+    explorerActivo = activo;
+    d3.select("#pestanas").classed("activas", activo);
+    actualizarVisibilidadFiltro();
+  }
+
+  function iniciarScroll() {
+    const pasos = document.querySelectorAll(".paso");
+    const obs = new IntersectionObserver(entradas => {
+      entradas.forEach(e => {
+        if (e.isIntersecting) {
+          pasos.forEach(p => p.classList.remove("activo"));
+          e.target.classList.add("activo");
+          const i = +e.target.dataset.paso;
+          if (ACCIONES[i]) ACCIONES[i]();
+        }
+      });
+    }, { rootMargin: "-45% 0px -45% 0px", threshold: 0 });  // se activa al cruzar el centro
+    pasos.forEach(p => obs.observe(p));
+  }
+  </script>
+</body>
+</html>
